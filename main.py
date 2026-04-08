@@ -6,46 +6,65 @@ from sklearn.model_selection import train_test_split
 weather = pd.read_csv("weather.csv")
 rides = pd.read_csv("cab_rides.csv")
 
-# Desired attributes from each file
-weather = weather[["temp", "clouds", "rain", "humidity", "wind", "pressure", "time_stamp", "location"]]
-rides = rides[["distance", "price", "time_stamp", "destination", "source", "surge_multiplier", "cab_type"]]
+# Drop non-desired attributes from each file
+# weather = weather.drop()
+rides = rides.drop(columns=["id", "name"])
 
-# Converts ms to s to match weather
-rides["time_stamp"] = rides["time_stamp"] // 1000
+# Convert timestamps to seconds
+weather["time_stamp_s_weather"] = weather["time_stamp"] # Already in seconds
+rides["time_stamp_s_ride"] = rides["time_stamp"] // 1000
 
-# Rename source column to location for merging
-rides = rides.rename(columns={"source": "location"})
-
-# Fill in 0s for missing rain data
+# Fill in 0's for missing rain data
 weather["rain"] = weather["rain"].fillna(0)
 
-# Merges ride and weather data by finding the nearest match on time stamp at the same location
-merged_data = pd.merge_asof(
-    rides.sort_values("time_stamp"),
-    weather.sort_values("time_stamp"),
-    on="time_stamp",
-    by="location",
-    tolerance=3600  # In seconds
-    )
+# Merge on source/location
+merged = rides.merge(weather, left_on="source", right_on="location", how="inner")
 
-# Number of rows before cleaning
-initial_num_rows = len(merged_data)
+# Filter merge by 1 hour
+merged["time_diff"] = (merged["time_stamp_s_ride"] - merged["time_stamp_s_weather"]).abs()
+merged = merged[merged["time_diff"] <= 3600]
 
-merged_data = merged_data.dropna(subset=["distance", "price", "temp", "clouds", "humidity", "wind", "pressure"])
+# Keep only closest weather row for each ride
+merged = merged.sort_values("time_diff").groupby("time_stamp_s_ride", as_index=False).first()
 
-# Number of rows after cleaning
-clean_num_rows = len(merged_data)
+# Extract day/hour for model
+merged["hour"] = pd.to_datetime(rides["time_stamp"], unit="ms").dt.hour
+merged["day_of_week"] = pd.to_datetime(rides["time_stamp"], unit="ms").dt.dayofweek
 
-print("Removed ", initial_num_rows - clean_num_rows, " rows with missing data.")
+merged = pd.get_dummies(merged, columns=["cab_type", "destination", "product_id"], drop_first=True)
 
-X = merged_data[["distance", "surge_multiplier", "temp", "clouds", "rain", "humidity", "wind", "pressure"]]
-y = merged_data[["price"]]
+# Prepare features
+ride_features = ["distance", "surge_multiplier", "hour", "day_of_week"] + \
+                [c for c in merged.columns if c.startswith("cab_type_") or c.startswith("destination_") or c.startswith("product_id_")]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, random_state=123)
+ride_weather_features = ride_features + ["temp", "clouds", "pressure", "rain", "humidity", "wind"]
 
-linearModel = LinearRegression()
+# Features with requried data
+required_features = ride_weather_features + ["price"]
 
-linearModel.fit(X_train, y_train)
+# Clean data
+merged_num = len(merged)
+merged = merged.dropna(subset=required_features)
+clean_num = len(merged)
+print("Removed ", merged_num-clean_num, " rows with missing data")
 
-score = linearModel.score(X_test, y_test)
-print(score)
+X_ride = merged[ride_features]
+X_ride_weather = merged[ride_weather_features]
+y = merged[["price"]]
+
+# 80% training, 20% testing
+X_train_r, X_test_r, y_train_r, y_test_r = train_test_split(X_ride, y, train_size=0.8, random_state=123)
+X_train_rw, X_test_rw, y_train_rw, y_test_rw = train_test_split(X_ride_weather, y, train_size=0.8, random_state=123)
+
+rideModel = LinearRegression()
+rideWeatherModel = LinearRegression()
+
+rideModel.fit(X_train_r, y_train_r)
+rideWeatherModel.fit(X_train_rw, y_train_rw)
+
+ride_score = rideModel.score(X_test_r, y_test_r)
+ride_weather_score = rideWeatherModel.score(X_test_rw, y_test_rw)
+
+print("Ride score: ", ride_score)
+print("Ride/Weather score: ", ride_weather_score)
+print("Performance gained: ", ride_weather_score - ride_score)
