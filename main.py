@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 
@@ -46,7 +47,7 @@ required_features = ride_weather_features + ["price"]
 merged_num = len(merged)
 merged = merged.dropna(subset=required_features)
 clean_num = len(merged)
-print("Removed ", merged_num-clean_num, " rows with missing data")
+# print("Removed ", merged_num-clean_num, " rows with missing data")
 
 X_ride = merged[ride_features]
 X_ride_weather = merged[ride_weather_features]
@@ -65,6 +66,29 @@ rideWeatherModel.fit(X_train_rw, y_train_rw)
 ride_score = rideModel.score(X_test_r, y_test_r)
 ride_weather_score = rideWeatherModel.score(X_test_rw, y_test_rw)
 
-print("Ride score: ", ride_score)
-print("Ride/Weather score: ", ride_weather_score)
-print("Performance gained: ", ride_weather_score - ride_score)
+print(f"Ride Score: {ride_score:.4f}")
+print(f"Ride Weather Score: {ride_weather_score:.4f}")
+
+# Error statistics
+y_test_r_flat = np.ravel(y_test_r)
+y_test_rw_flat = np.ravel(y_test_rw)
+
+y_pred_r = np.ravel(rideModel.predict(X_test_r))
+y_pred_rw = np.ravel(rideWeatherModel.predict(X_test_rw))
+
+error_ride = y_test_r_flat - y_pred_r
+error_ride_weather = y_test_rw_flat - y_pred_rw
+
+mean_ride = np.mean(error_ride)
+var_ride = np.var(error_ride, ddof=1)
+
+mean_ride_weather = np.mean(error_ride_weather)
+var_ride_weather = np.var(error_ride_weather, ddof=1)
+
+print("\nRide Model Error Statistics:")
+print(f"Mean: {mean_ride:.4f}")
+print(f"Var: {var_ride:.2f}")
+print("\nRide Weather Model Error Statistics:")
+print(f"Mean: {mean_ride_weather:.4f}")
+print(f"Var: {var_ride_weather:.2f}")
+
